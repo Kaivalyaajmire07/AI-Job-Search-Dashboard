@@ -1,14 +1,49 @@
 """Central configuration: environment variables and static option lists.
 
-Pure constants — no network calls, no Streamlit, no session state. Safe
-to import from every other module.
+Pure constants — no network calls, no Streamlit session state. Safe to
+import from every other module.
+
+Secrets resolution order (see get_secret()):
+  1. st.secrets[key]   -> populated on Streamlit Community Cloud from
+                           the app's Secrets page (TOML format).
+  2. os.getenv(key)    -> populated locally by load_dotenv() reading a
+                           .env file, or by real environment variables.
+
+No .env file is required to exist. If it's missing, load_dotenv() is a
+silent no-op and get_secret() simply falls through to os.getenv(),
+which returns `default` (or None) for anything unset.
 """
 import logging
 import os
+from typing import Optional
 
+import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
+    """Resolve a config value from st.secrets first, then os.getenv().
+
+    Works identically on Streamlit Community Cloud (st.secrets is
+    populated from the app's Secrets page) and locally (no secrets.toml
+    is present, so this falls back to whatever load_dotenv() put into
+    the process environment, or a real env var).
+
+    Only the two expected "secret not configured" cases are swallowed:
+      * FileNotFoundError -> no secrets.toml exists at all (the normal
+        case for local development), raised by Streamlit when
+        st.secrets is accessed.
+      * KeyError -> a secrets.toml exists but doesn't define `key`.
+    Any other exception is allowed to propagate rather than being
+    silently hidden.
+    """
+    try:
+        return st.secrets[key]
+    except (FileNotFoundError, KeyError):
+        return os.getenv(key, default)
+
 
 # ---------------- Shared logger ---------------- #
 # api.py and cache.py both log through this — defined here so every
@@ -21,14 +56,21 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 # ---------------- API credentials & key rotation ---------------- #
-API_HOST = os.getenv("RAPIDAPI_HOST", "jsearch.p.rapidapi.com")
+API_HOST = get_secret("RAPIDAPI_HOST", "jsearch.p.rapidapi.com")
 API_URL = "https://jsearch.p.rapidapi.com/search-v2"
 
-# Reads RAPIDAPI_KEY1 .. RAPIDAPI_KEY5 from .env (any that are unset are
-# skipped). Falls back to plain RAPIDAPI_KEY for backward compatibility
-# with a single-key .env file.
-_ROTATION_KEYS = [os.getenv(f"RAPIDAPI_KEY{i}") for i in range(1, 6)]
-API_KEYS = [k for k in _ROTATION_KEYS if k] or ([os.getenv("RAPIDAPI_KEY")] if os.getenv("RAPIDAPI_KEY") else [])
+# Reads RAPIDAPI_KEY1 .. RAPIDAPI_KEY5 from st.secrets (Cloud) or
+# .env/env vars (local). Any that are unset are skipped. Falls back to
+# plain RAPIDAPI_KEY for backward compatibility with a single-key setup.
+_ROTATION_KEYS = [get_secret(f"RAPIDAPI_KEY{i}") for i in range(1, 6)]
+
+API_KEYS = [k for k in _ROTATION_KEYS if k]
+
+if not API_KEYS:
+    single_key = get_secret("RAPIDAPI_KEY")
+    if single_key:
+        API_KEYS = [single_key]
+
 
 REQUEST_TIMEOUT = 15          # seconds, per HTTP request
 CACHE_TTL_SECONDS = 600       # identical searches reuse cached results for 10 min

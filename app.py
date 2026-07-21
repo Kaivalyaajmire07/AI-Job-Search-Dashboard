@@ -16,7 +16,7 @@ layout) — only backend/search logic changed:
   * 401 / 403 / 429 / 500 all get their own specific, friendly message.
 
 Module map:
-  config.py                 env + constants (incl. API key rotation list)
+  config.py                 env/secrets + constants (incl. API key rotation list)
   models.py                 SearchParams / MatchResult dataclasses
   utils.py                  formatting, job identity, CSV export
   location_parser.py        multi-location parsing + normalization
@@ -32,89 +32,40 @@ Module map:
   styles.py                     HTML-free Streamlit UI components
 
 -----------------------------------------------------------------------
-STARTUP ENV VALIDATION
+STARTUP CONFIG VALIDATION
 -----------------------------------------------------------------------
-Everything below the imports of `os` / `dotenv` / `streamlit` runs
-BEFORE any other project module is imported, since config.py reads its
-environment variables at import time.
+Everything below the imports of `streamlit` runs BEFORE any other
+project module is imported, since config.py resolves its secrets at
+import time.
+
+Secrets/env resolution (see config.get_secret()):
+  * Streamlit Community Cloud -> read from st.secrets (the app's
+    Secrets page).
+  * Local machine             -> read from a .env file via
+    load_dotenv(), or from real environment variables.
+A missing .env file is NOT an error — it's the expected case on Cloud.
+The only thing that IS validated is that RAPIDAPI_HOST and at least one
+RAPIDAPI_KEY* actually resolved to a value, from whichever source.
 """
-import logging
-import os
 import time
 from datetime import datetime
 
-from dotenv import find_dotenv, load_dotenv
-
 import streamlit as st
-
-logger = logging.getLogger("job_dashboard")
-if not logger.handlers:
-    _handler = logging.StreamHandler()
-    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    logger.addHandler(_handler)
-    logger.setLevel(logging.INFO)
 
 st.set_page_config(page_title="Job Search Dashboard", page_icon="💼", layout="wide")
 
 EXPECTED_RAPIDAPI_HOST = "jsearch.p.rapidapi.com"
-REQUIRED_KEY_ENV_NAMES = [f"RAPIDAPI_KEY_{i}" for i in range(1, 6)]
 
 # ---------------------------------------------------------------------
-# 1) Locate and load .env BEFORE anything else reads os.getenv()
+# 1) Import config first — this is where RAPIDAPI_HOST / RAPIDAPI_KEY1..5
+#    get resolved (st.secrets on Cloud, .env/os.getenv() locally). The
+#    shared logger also lives there, so every module (including this
+#    one) logs through the same handler/format without reconfiguring it.
 # ---------------------------------------------------------------------
-_dotenv_path = find_dotenv(usecwd=True)
-if not _dotenv_path:
-    st.error("Environment file (.env) not found.")
-    st.stop()
-
-load_dotenv(_dotenv_path, override=True)
-
-# ---------------------------------------------------------------------
-# 2) Normalize alternate key-naming conventions (RAPIDAPI_KEY_1 vs
-#    RAPIDAPI_KEY1) so config.py sees the right values either way.
-# ---------------------------------------------------------------------
-for _i in range(1, 6):
-    _underscored = os.getenv(f"RAPIDAPI_KEY_{_i}")
-    _plain = os.getenv(f"RAPIDAPI_KEY{_i}")
-    if _underscored and not _plain:
-        os.environ[f"RAPIDAPI_KEY{_i}"] = _underscored
-    if _plain and not _underscored:
-        os.environ[f"RAPIDAPI_KEY_{_i}"] = _plain
-
-# ---------------------------------------------------------------------
-# 3) Validate every required variable BEFORE importing project modules.
-#    Never continue with a missing key or an unexpected host.
-# ---------------------------------------------------------------------
-_loaded_host = os.getenv("RAPIDAPI_HOST", "")
-
-if not _loaded_host:
-    st.error("Missing RAPIDAPI_HOST in your .env file.")
-    st.stop()
-
-if _loaded_host != EXPECTED_RAPIDAPI_HOST:
-    st.error(
-        f"RAPIDAPI_HOST is set to \"{_loaded_host}\", but this app requires "
-        f"\"{EXPECTED_RAPIDAPI_HOST}\". Please fix RAPIDAPI_HOST in your .env file."
-    )
-    st.stop()
-
-_missing_keys = [name for name in REQUIRED_KEY_ENV_NAMES if not os.getenv(name)]
-if _missing_keys:
-    for _name in _missing_keys:
-        st.error(f"Missing {_name}")
-    st.stop()
-
-_loaded_key_count = sum(1 for name in REQUIRED_KEY_ENV_NAMES if os.getenv(name))
-
-logger.info("Loaded Host: %s", _loaded_host)
-logger.info("Loaded Keys Count: %d", _loaded_key_count)
-
-# ---------------------------------------------------------------------
-# 4) Only now import project modules.
-# ---------------------------------------------------------------------
-from api import ALL_KEYS_EXHAUSTED_MESSAGE, AllKeysExhaustedError, JSearchAuthError, JSearchClientError
-from cache import fetch_jobs_multi_location
 from config import (
+    API_HOST,
+    API_KEYS,
+    API_REQUEST_DEBOUNCE_SECONDS,
     COUNTRY_CODES,
     EMPLOYMENT_TYPES,
     EXPERIENCE_LEVELS,
@@ -127,7 +78,49 @@ from config import (
     QUICK_TIPS,
     ROLE_SUGGESTIONS,
     SORT_OPTIONS,
+    logger,
 )
+
+
+def _validate_startup_config() -> None:
+    """Fail fast with a friendly message if required config is missing.
+
+    Only validates that values *resolved* to something — never that a
+    .env file exists on disk (st.secrets is the expected source on
+    Streamlit Community Cloud).
+    """
+    if API_HOST != EXPECTED_RAPIDAPI_HOST:
+        logger.error("Unexpected RAPIDAPI_HOST: %r", API_HOST)
+        st.error(
+            f"RAPIDAPI_HOST is set to \"{API_HOST}\", but this app requires "
+            f"\"{EXPECTED_RAPIDAPI_HOST}\". Please fix RAPIDAPI_HOST in your "
+            "Streamlit Cloud secrets, or in your local .env file."
+        )
+        st.stop()
+
+    if not API_KEYS:
+        logger.error("No RapidAPI keys resolved from secrets or environment.")
+        st.error(
+            "No RapidAPI keys found. Add RAPIDAPI_KEY1 through RAPIDAPI_KEY5 "
+            "(or at least one of them) to your Streamlit Cloud app secrets, "
+            "or to a local .env file."
+        )
+        st.stop()
+
+
+_validate_startup_config()
+
+_loaded_host: str = API_HOST
+_loaded_key_count: int = len(API_KEYS)
+
+logger.info("Loaded Host: %s", _loaded_host)
+logger.info("Loaded Keys Count: %d", _loaded_key_count)
+
+# ---------------------------------------------------------------------
+# 2) Only now import the rest of the project modules.
+# ---------------------------------------------------------------------
+from api import ALL_KEYS_EXHAUSTED_MESSAGE, AllKeysExhaustedError, JSearchAuthError, JSearchClientError
+from cache import fetch_jobs_multi_location
 from duplicate_detector import remove_duplicates
 from filters import apply_local_filters, process_jobs, sort_jobs
 from location_parser import parse_locations
@@ -138,11 +131,6 @@ from ranking_engine import rank_jobs
 from skills_extractor import extract_skills
 from styles import render_ai_metric_cards, render_job_card, render_metric_cards, render_pagination_controls
 from utils import get_job_key, jobs_to_csv
-
-try:
-    from config import API_REQUEST_DEBOUNCE_SECONDS
-except ImportError:
-    API_REQUEST_DEBOUNCE_SECONDS = 1
 
 # ---------------- Session State ---------------- #
 DEFAULT_STATE = {
@@ -196,7 +184,14 @@ def build_job_query(role: str, employment: str, remote_only: bool, locations: li
     return query
 
 
-def add_recent_search(role: str):
+def add_recent_search(role: str) -> None:
+    """Push `role` onto the recent-searches stack (most-recent-first).
+
+    No-ops for a blank role, and skips the push entirely if it's an
+    exact (case-insensitive) repeat of the most recent entry, so
+    re-running the same search doesn't spam the sidebar list. The list
+    is capped at MAX_RECENT_SEARCHES entries.
+    """
     role = role.strip()
     if not role:
         return
@@ -207,7 +202,14 @@ def add_recent_search(role: str):
     st.session_state.recent_searches = [entry] + history[:MAX_RECENT_SEARCHES - 1]
 
 
-def apply_filters_and_paginate(params: SearchParams):
+def apply_filters_and_paginate(params: SearchParams) -> None:
+    """Apply local (non-API) filters/sort to the cached fetched_jobs
+    and refresh the pagination state that depends on the result count.
+
+    This is separate from the API fetch itself so that filter-only
+    changes (posted-within, experience, salary, company, sort) can be
+    re-applied without re-hitting the JSearch API.
+    """
     filtered = apply_local_filters(
         st.session_state.fetched_jobs,
         st.session_state.posted_filter_value,
@@ -244,7 +246,7 @@ def _friendly_message_for_error(error: Exception) -> str:
     return str(error)
 
 
-def run_search(params: SearchParams):
+def run_search(params: SearchParams) -> None:
     """Fetch (only if needed) and rank jobs, then store the results.
 
     * Debounced: two triggers within 1 second are coalesced.
@@ -255,6 +257,12 @@ def run_search(params: SearchParams):
       one bad/rate-limited/empty city never stops the rest.
     * On total failure, previously loaded results are kept on screen.
     """
+    # NOTE: this is a short (<=1s), user-triggered wait that gates a
+    # single outgoing network call — not a loop or background task —
+    # so a blocking sleep here is the simplest correct option. Streamlit
+    # reruns the whole script top-to-bottom on each interaction, so
+    # there's no separate "request thread" to defer this onto without
+    # changing the debounce behavior itself.
     now = time.time()
     elapsed = now - st.session_state.last_search_trigger_time
     if elapsed < API_REQUEST_DEBOUNCE_SECONDS:
@@ -277,7 +285,7 @@ def run_search(params: SearchParams):
         country_code = COUNTRY_CODES[params.country]
         had_previous_results = bool(st.session_state.fetched_jobs)
 
-        def query_builder(location):
+        def query_builder(location: str) -> str:
             locs = [location] if location else []
             return build_job_query(params.role, params.employment, params.remote_only, locs)
 
@@ -291,8 +299,15 @@ def run_search(params: SearchParams):
                 raw_jobs, errors = fetch_jobs_multi_location(
                     query_builder, country_code, NUM_API_PAGES, params.locations
                 )
-        except Exception as e:  # only a genuinely unexpected crash reaches here
-            st.exception(e)
+        except Exception as exc:
+            # Deliberately broad: fetch_jobs_multi_location already
+            # translates every known JSearch failure mode (auth, rate
+            # limit, server error, network error) into `errors` below.
+            # Anything raised past that point is a genuinely unexpected
+            # crash, so it's logged and surfaced rather than narrowed
+            # to a specific type we can't predict.
+            logger.exception("Unexpected error during job search")
+            st.exception(exc)
             return
 
         if raw_jobs:
@@ -340,7 +355,8 @@ def run_search(params: SearchParams):
     apply_filters_and_paginate(params)
 
 
-def toggle_bookmark(job: dict):
+def toggle_bookmark(job: dict) -> None:
+    """Add `job` to session bookmarks if not already saved, else remove it."""
     key = get_job_key(job)
     if key in st.session_state.bookmarks:
         del st.session_state.bookmarks[key]
@@ -348,7 +364,13 @@ def toggle_bookmark(job: dict):
         st.session_state.bookmarks[key] = job
 
 
-def jump_to_page(page_number: int):
+def clear_recent_searches() -> None:
+    """Empty the recent-searches sidebar list."""
+    st.session_state.recent_searches = []
+
+
+def jump_to_page(page_number: int) -> None:
+    """Set current_page (clamped to the valid range) and rerun the app."""
     st.session_state.current_page = clamp_page(int(page_number), st.session_state.total_pages_count)
     st.rerun()
 
@@ -485,7 +507,7 @@ with st.sidebar:
 
         st.button(
             "🗑 Clear History", use_container_width=True,
-            on_click=lambda: st.session_state.update(recent_searches=[]),
+            on_click=clear_recent_searches,
         )
 
     st.divider()
