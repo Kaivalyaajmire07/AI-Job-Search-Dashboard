@@ -1,0 +1,215 @@
+/* ===========================
+   BACKGROUND
+=========================== */
+
+.stApp{
+    background-color:#0E1117;
+}
+
+/* ===========================
+   TITLE
+=========================== */
+
+h1{
+    color:#FFFFFF;
+    font-weight:bold;
+    animation:fadeIn 0.8s ease;
+}
+
+/* ===========================
+   FADE ANIMATION
+=========================== */
+
+@keyframes fadeIn{
+
+    from{
+        opacity:0;
+        transform:translateY(20px);
+    }
+
+    to{
+        opacity:1;
+        transform:translateY(0);
+    }
+
+}
+
+/* ===========================
+   JOB CARD
+=========================== */
+
+.job-card{
+
+    background:#161B22;
+
+    border-radius:15px;
+
+    padding:20px;
+
+    margin-top:15px;
+
+    margin-bottom:15px;
+
+    border:1px solid #30363D;
+
+    animation:fadeIn .6s ease;
+
+    transition:all .3s ease;
+
+}
+
+.job-card:hover{
+
+    transform:translateY(-6px);
+
+    border:1px solid #58A6FF;
+
+    box-shadow:0px 10px 25px rgba(88,166,255,.35);
+
+}
+
+/* ===========================
+   BUTTON
+=========================== */
+
+.stButton>button{
+
+    background:#238636;
+
+    color:white;
+
+    border-radius:12px;
+
+    height:48px;
+
+    width:100%;
+
+    font-size:18px;
+
+    border:none;
+
+    transition:all .3s ease;
+
+}
+
+.stButton>button:hover{
+
+    background:#2EA043;
+
+    transform:scale(1.05);
+
+}
+
+/* ===========================
+   METRIC CARD
+=========================== */
+
+[data-testid="stMetric"]{
+
+    background:#161B22;
+
+    border-radius:12px;
+
+    padding:15px;
+
+    border:1px solid #30363D;
+
+    transition:.3s;
+
+}
+
+[data-testid="stMetric"]:hover{
+
+    transform:translateY(-5px);
+
+    box-shadow:0px 8px 20px rgba(88,166,255,.35);
+
+}
+
+/* ===========================
+   TEXT INPUT
+=========================== */
+
+.stTextInput>div>div>input{
+
+    border-radius:10px;
+
+    transition:.3s;
+
+}
+
+.stTextInput>div>div>input:hover{
+
+    border:2px solid #58A6FF;
+
+}
+
+/* ===========================
+   SELECT BOX
+=========================== */
+
+.stSelectbox>div>div{
+
+    border-radius:10px;
+
+    transition:.3s;
+
+}
+
+.stSelectbox:hover{
+
+    transform:scale(1.01);
+
+}
+
+/* ===========================
+   EXPANDER
+=========================== */
+
+.streamlit-expanderHeader{
+
+    font-weight:bold;
+
+    transition:.3s;
+
+}
+
+.streamlit-expanderHeader:hover{
+
+    color:#58A6FF;
+
+}
+
+/* ===========================
+   DIVIDER
+=========================== */
+
+hr{
+
+    border:1px solid #30363D;
+
+}
+
+/* ===========================
+   SCROLLBAR
+=========================== */
+
+::-webkit-scrollbar{
+
+    width:8px;
+
+}
+
+::-webkit-scrollbar-thumb{
+
+    background:#58A6FF;
+
+    border-radius:20px;
+
+}
+
+::-webkit-scrollbar-track{
+
+    background:#0E1117;
+
+}
